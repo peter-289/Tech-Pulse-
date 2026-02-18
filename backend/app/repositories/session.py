@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.models.session import UserSession
 
@@ -24,7 +24,10 @@ class SessionRepo:
         session.revoked_at = revoked_at
 
     def revoke_user_sessions(self, user_id: int, revoked_at: datetime) -> None:
-        stmt = select(UserSession).where(UserSession.user_id == user_id)
-        sessions = self.db.execute(stmt).scalars().all()
-        for session in sessions:
-            session.revoked_at = revoked_at
+        stmt = (
+            update(UserSession)
+            .where(UserSession.user_id == user_id)
+            .where(UserSession.revoked_at.is_(None))
+            .values(revoked_at=revoked_at)
+        )
+        self.db.execute(stmt)

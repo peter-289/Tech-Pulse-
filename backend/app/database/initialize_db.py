@@ -1,9 +1,11 @@
 from app.models import (
+    audit_event,
     user,
     session,
     chat_message,
     project,
     resource,
+    security_alert,
     software_package,
     file_blob,
     file_version,

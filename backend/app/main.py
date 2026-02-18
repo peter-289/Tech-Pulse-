@@ -7,6 +7,8 @@ import logging
 
 from app.exceptions.handlers import register_exception_handlers
 from app.core.config import FRONTEND_URL, EMAIL_RECOVERY_ENABLED
+from app.core.audit_middleware import AuditMiddleware
+from app.core.logging_setup import configure_logging
 from app.database.db_setup import SessionLocal
 from app.database.initialize_db import init_db
 from app.services.superuser_seeder import seed_superuser
@@ -18,6 +20,9 @@ from app.api.v1.support_chat import router as support_chat_router
 from app.api.v1.projects import router as project_router
 from app.api.v1.resources import router as resource_router
 from app.api.v1.software_packages import router as software_package_router
+from app.api.v1.admin import router as admin_router
+
+configure_logging()
 
 # Initialize app
 app = FastAPI(
@@ -40,6 +45,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(AuditMiddleware)
 
 
 # Ensure crucial services are on on startup.
@@ -91,6 +97,7 @@ app.include_router(support_chat_router)
 app.include_router(project_router)
 app.include_router(resource_router)
 app.include_router(software_package_router)
+app.include_router(admin_router)
 
 # Serve frontend build in production if present
 frontend_build = Path(__file__).resolve().parents[2] / "frontend" / "build"

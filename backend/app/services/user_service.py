@@ -1,11 +1,16 @@
+import logging
+
 from app.schemas.user import UserCreate
 from app.exceptions.exceptions import ConflictError
 from app.core.hashing import hash_password
 from app.models.user import User
 from app.core.unit_of_work import UnitOfWork
+from app.core.security import validate_password_strength
 
 from sqlalchemy.exc import IntegrityError
 from app.exceptions.exceptions import NotFoundError
+
+logger = logging.getLogger(__name__)
 
 
 class UserService:
@@ -15,11 +20,8 @@ class UserService:
     # Create user
     def create_user(self, payload: UserCreate):
         with self.uow:
-            if self.uow.user_repo.get_user_by_username(payload.username):
-                raise ConflictError(f"A user with username {payload.username} exists!")
-            if self.uow.user_repo.get_user_by_email(payload.email):
-                raise ConflictError(f"User with email {payload.email} already exists!")
-
+            # Validate password strength
+            validate_password_strength(payload.password)
             # Hash password
             pass_hash = hash_password(payload.password)
 
@@ -31,27 +33,31 @@ class UserService:
                 gender=payload.gender,
                 password_hash=pass_hash,
             )
-
             try:
                 user = self.uow.user_repo.add_user(user)
-            except IntegrityError:
-                raise ConflictError("Username or email already exists.")
+            except IntegrityError as exc:
+                raise self._map_user_integrity_error(exc) from exc
             return user
         
     # List users
-    def list_users(self, offset: int = 0, limit: int = 100) -> list[User]:
-        with self.uow:
-            return self.uow.user_repo.list_users(offset=offset, limit=limit)
+    def list_users(self, cursor: int | None = None, limit: int = 100) -> list[User]:
+        with self.uow.read_only():
+            users = self.uow.user_repo.list_users(cursor=cursor, limit=limit)
+            logger.debug("Fetched users page", extra={"cursor": cursor, "limit": limit, "count": len(users)})
+            return users
 
     # Get user by id
     def get_user_by_id(self, user_id: int) -> User:
-        with self.uow:
+        with self.uow.read_only():
             user = self.uow.user_repo.get_user_by_id(user_id)
             if not user:
                 raise NotFoundError("User not found")
             return user
-        
 
-        
-    
- 
+    def _map_user_integrity_error(self, exc: IntegrityError) -> ConflictError:
+        message = str(getattr(exc, "orig", exc)).lower()
+        if "username" in message:
+            return ConflictError("Username already exists.")
+        if "email" in message:
+            return ConflictError("Email already exists.")
+        return ConflictError("Username or email already exists.")

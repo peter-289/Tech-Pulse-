@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from pathlib import Path
 
@@ -7,6 +8,8 @@ from app.core.config import UPLOAD_ROOT
 from app.core.unit_of_work import UnitOfWork
 from app.exceptions.exceptions import NotFoundError, PermissionError, ValidationError
 from app.models.project import Project
+
+logger = logging.getLogger(__name__)
 
 
 class ProjectHubService:
@@ -59,12 +62,17 @@ class ProjectHubService:
         with self.uow:
             return self.uow.project_repo.add(project)
 
-    def list_projects(self, *, user_id: int, offset: int = 0, limit: int = 50) -> list[Project]:
-        with self.uow:
-            return self.uow.project_repo.list_visible_for_user(user_id=user_id, offset=offset, limit=limit)
+    def list_projects(self, *, user_id: int, cursor: int | None = None, limit: int = 50) -> list[Project]:
+        with self.uow.read_only():
+            projects = self.uow.project_repo.list_visible_for_user(user_id=user_id, cursor=cursor, limit=limit)
+            logger.debug(
+                "Fetched projects page",
+                extra={"user_id": user_id, "cursor": cursor, "limit": limit, "count": len(projects)},
+            )
+            return projects
 
     def get_project_for_user(self, *, user_id: int, project_id: int) -> Project:
-        with self.uow:
+        with self.uow.read_only():
             project = self.uow.project_repo.get_by_id(project_id)
             if not project:
                 raise NotFoundError("Project not found")
@@ -79,17 +87,21 @@ class ProjectHubService:
                 raise NotFoundError("Project not found")
             if not project.is_public and project.user_id != user_id:
                 raise PermissionError("You do not have access to this project")
-            self.uow.project_repo.increment_download_count(project)
+            self.uow.project_repo.increment_download_count(project_id=project.id)
             return project
 
     def delete_project(self, *, user_id: int, project_id: int) -> None:
+        file_path: str | None = None
         with self.uow:
             project = self.uow.project_repo.get_by_id(project_id)
             if not project:
                 raise NotFoundError("Project not found")
             if project.user_id != user_id:
                 raise PermissionError("Only the owner can delete this project")
-
-            Path(project.file_path).unlink(missing_ok=True)
+            file_path = project.file_path
             self.uow.project_repo.delete(project)
-
+        if file_path:
+            try:
+                Path(file_path).unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Failed to remove project file", extra={"project_id": project_id})

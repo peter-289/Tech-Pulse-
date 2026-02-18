@@ -1,6 +1,6 @@
 from __future__ import annotations
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import String, func
+from sqlalchemy import Index, String, func
 from datetime import datetime
 
 from app.database.db_setup import Base
@@ -11,6 +11,14 @@ from app.models.enums import GenderEnum, UserStatus, RoleEnum
 class User(Base):
 
      __tablename__ = "users"
+     __table_args__ = (
+          Index(
+               "ix_users_verification_retry_lookup",
+               "status",
+               "created_at",
+               "verification_email_next_retry_at",
+          ),
+     )
 
      id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True, index=True)
      full_name: Mapped[str] = mapped_column(String(150), nullable=False)

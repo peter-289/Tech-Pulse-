@@ -23,7 +23,7 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(ValidationError)
     async def _validation_handler(_request: Request, exc: ValidationError) -> JSONResponse:
-        return JSONResponse(status_code=status.HTTP_401_UNAUTHORIZED, content={"detail": str(exc)})
+        return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"detail": str(exc)})
 
     @app.exception_handler(PermissionError)
     async def _permission_handler(_request: Request, exc: PermissionError) -> JSONResponse:

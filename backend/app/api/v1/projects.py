@@ -18,7 +18,7 @@ def get_service(db: Session = Depends(get_db)) -> ProjectHubService:
 
 
 @router.post("", response_model=ProjectRead, status_code=201)
-async def create_project(
+def create_project(
     name: str = Form(...),
     description: str = Form(...),
     version: str | None = Form(None),
@@ -27,7 +27,7 @@ async def create_project(
     service: ProjectHubService = Depends(get_service),
     current_user: dict = Depends(get_current_user),
 ):
-    content = await file.read()
+    content = file.file.read()
     return service.create_project(
         user_id=int(current_user["user_id"]),
         name=name,
@@ -41,12 +41,12 @@ async def create_project(
 
 @router.get("", response_model=list[ProjectRead], status_code=200)
 def list_projects(
-    offset: int = Query(0, ge=0),
+    cursor: int | None = Query(None, ge=1),
     limit: int = Query(50, ge=1, le=200),
     service: ProjectHubService = Depends(get_service),
     current_user: dict = Depends(get_current_user),
 ):
-    return service.list_projects(user_id=int(current_user["user_id"]), offset=offset, limit=limit)
+    return service.list_projects(user_id=int(current_user["user_id"]), cursor=cursor, limit=limit)
 
 
 @router.get("/{project_id}", response_model=ProjectRead, status_code=200)
@@ -77,4 +77,3 @@ def delete_project(
 ):
     service.delete_project(user_id=int(current_user["user_id"]), project_id=project_id)
     return None
-

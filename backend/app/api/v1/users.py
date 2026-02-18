@@ -9,6 +9,9 @@ from app.database.db_setup import get_db
 from app.services.auth_service import AuthService
 from app.core.security import admin_access, get_current_user
 
+from app.exceptions.exceptions import DomainError
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api/v1",
@@ -27,7 +30,7 @@ def get_auth_service(db: Session=Depends(get_db))->AuthService:
 
 # Registration route
 @router.post("/users", response_model=UserResponse, status_code=201)
-async def register_user(
+def register_user(
     payload: UserCreate,
     background_tasks: BackgroundTasks,
     service: UserService = Depends(get_service),
@@ -36,8 +39,8 @@ async def register_user(
     user = service.create_user(payload)
     try:
         auth_service.enqueue_verification_email(background_tasks, payload=user)
-    except Exception as e:
-        logging.error("[-] Failed to send verification email %s", e)
+    except DomainError as exc:
+        logger.warning("Failed to queue verification email", extra={"user_id": user.id, "error": str(exc)})
     return user
 
 
@@ -54,12 +57,12 @@ def get_my_profile(
 # List users
 @router.get("/users", response_model=list[UserRead], status_code=200)
 def list_users(
-    offset: int = Query(0, ge=0),
+    cursor: int | None = Query(None, ge=1),
     limit: int = Query(100, ge=1, le=200),
     service: UserService = Depends(get_service),
     _admin: dict = Depends(admin_access),
 ):
-    return service.list_users(offset=offset, limit=limit)
+    return service.list_users(cursor=cursor, limit=limit)
 
 # Get user by id
 @router.get("/users/{user_id}", response_model=UserRead, status_code=200)
@@ -69,5 +72,4 @@ def get_user(
     _admin: dict = Depends(admin_access),
 ):
     return service.get_user_by_id(user_id=user_id)
-
 

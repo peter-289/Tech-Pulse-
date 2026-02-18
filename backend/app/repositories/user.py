@@ -54,8 +54,10 @@ class UserRepo:
         stmt = select(User).where(User.email == email)
         return self.db.execute(stmt).scalar_one_or_none()
 
-    def list_users(self, offset: int = 0, limit: int = 100) -> list[User]:
-        stmt = select(User).offset(offset).limit(limit)
+    def list_users(self, cursor: int | None = None, limit: int = 100) -> list[User]:
+        stmt = select(User).order_by(User.id.desc()).limit(limit)
+        if cursor is not None:
+            stmt = stmt.where(User.id < cursor)
         return self.db.execute(stmt).scalars().all()
 
     def list_users_pending_verification_email_retry(

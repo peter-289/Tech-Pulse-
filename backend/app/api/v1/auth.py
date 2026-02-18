@@ -89,6 +89,7 @@ def login(
         user_agent=user_agent,
         ip_address=ip_address,
     )
+    request.state.audit_actor_user_id = user.id
     # Set cookies
     _set_auth_cookies(response, access_token, refresh_token)
     return {

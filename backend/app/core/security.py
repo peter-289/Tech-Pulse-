@@ -52,8 +52,8 @@ def create_email_verification_token(user_id: int)->str:
         "sub": str(user_id),
         "exp": expire,
         "iat": now,
-        "purpose": "email_verification",
-        "iss": "Tech_Pulse_Technologies"
+        "purpose": EXPECTED_PURPOSE,
+        "iss": EXPECTED_ISSUER
     }
     token = jwt.encode(payload, EMAIL_VERIFY_SECRET, algorithm=ALGORITHM)
     return token
@@ -72,7 +72,7 @@ def create_password_reset_token(user_id: int) -> str:
     }
     return jwt.encode(payload, PASSWORD_RESET_SECRET, algorithm=ALGORITHM)
 
-
+# Get the current user from the token sent to them in the header or cookie
 def get_current_user(
         request: Request,
         token: str = Depends(oauth2_scheme),
@@ -96,6 +96,25 @@ def get_current_user(
         "user_id": user_id,
         "role": role
     }
+
+
+def get_current_user_optional(request: Request) -> dict | None:
+    token = request.cookies.get(ACCESS_COOKIE_NAME) if request else None
+    if not token:
+        auth_header = request.headers.get("authorization") if request else None
+        if auth_header and auth_header.lower().startswith("bearer "):
+            token = auth_header.split(" ", 1)[1].strip()
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload.get("sub")
+        role = payload.get("role")
+        if not user_id or not role:
+            return None
+        return {"user_id": int(user_id), "role": str(role)}
+    except JWTError:
+        return None
 
 
 # Get a user assocciated with the token sent to them
@@ -123,7 +142,7 @@ def get_email_user(token: str):
         "purpose": purpose
     }
 
-
+# Get a user associated with the password reset token sent to them
 def get_password_reset_user(token: str):
     try:
         payload = jwt.decode(

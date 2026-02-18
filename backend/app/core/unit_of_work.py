@@ -1,3 +1,6 @@
+from contextlib import contextmanager
+from typing import Iterator
+
 from sqlalchemy.orm import Session
 from app.repositories.user import UserRepo
 from app.repositories.session import SessionRepo
@@ -92,3 +95,15 @@ class UnitOfWork:
             self.rollback()
         else:
             self.commit()
+
+    @contextmanager
+    def read_only(self) -> Iterator["UnitOfWork"]:
+        """Context manager for read-only operations.
+
+        Avoids unnecessary commits while still rolling back on read-time errors.
+        """
+        try:
+            yield self
+        except Exception:
+            self.rollback()
+            raise

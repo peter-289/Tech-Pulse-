@@ -28,6 +28,20 @@ def _normalize_smtp_host(value: str) -> str:
 # Load variables
 DATABASE_URL = os.getenv("DATABASE_URL")
 SECRET_KEY =   os.getenv("SECRET_KEY")
+DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "10"))
+DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "20"))
+DB_POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "30"))
+DB_POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE", "1800"))
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+LOG_DIR = os.getenv("LOG_DIR", str(Path(__file__).resolve().parents[2] / "logs"))
+LOG_FILE_PATH = os.getenv("LOG_FILE_PATH", str(Path(LOG_DIR) / "app.log"))
+LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", str(10 * 1024 * 1024)))
+LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", "5"))
+AUDIT_ENABLED = os.getenv("AUDIT_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+ALERT_LOGIN_FAILURE_THRESHOLD = int(os.getenv("ALERT_LOGIN_FAILURE_THRESHOLD", "5"))
+ALERT_ACCESS_DENIED_THRESHOLD = int(os.getenv("ALERT_ACCESS_DENIED_THRESHOLD", "10"))
+ALERT_LOOKBACK_MINUTES = int(os.getenv("ALERT_LOOKBACK_MINUTES", "15"))
+ALERT_DEDUP_MINUTES = int(os.getenv("ALERT_DEDUP_MINUTES", "15"))
 
 
 # Redis
@@ -45,7 +59,7 @@ SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "true").lower() in {"1", "true", "yes",
 SMTP_HOST = _normalize_smtp_host(SMTP_HOST)
 BASE_URL = os.getenv("BASE_URL")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
-BACKEND_URL = os.getenv("BACKEND_URL", BASE_URL or "http://127.0.0.1:8000")
+BACKEND_URL = os.getenv("BACKEND_URL", BASE_URL) or "http://127.0.0.1:8000"
 
 UPLOAD_ROOT = os.getenv("UPLOAD_ROOT", str(Path(__file__).resolve().parents[2] / "storage"))
 PACKAGE_STORAGE_BACKEND = os.getenv("PACKAGE_STORAGE_BACKEND", "local")

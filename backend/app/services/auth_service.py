@@ -27,19 +27,19 @@ class AuthService:
     
     def authenticate_user(self, username: str, password: str):
         try:
-            user = self.uow.user_repo.get_user_by_username(username)
-            if not user or not verify_password(user.password_hash, password):
-                raise ValidationError("Invalid username or password")
-            
-            if user.status != UserStatus.VERIFIED:
-                raise ValidationError("Email not approved")
+            with self.uow.read_only():
+                user = self.uow.user_repo.get_user_by_username(username)
+                if not user or not verify_password(user.password_hash, password):
+                    raise ValidationError("Invalid username or password")
+                
+                if user.status != UserStatus.VERIFIED:
+                    raise ValidationError("Email not approved")
 
-
-            payload = {
-                "sub": str(user.id),
-                "role": user.role.value if hasattr(user.role, "value") else str(user.role)
-            }
-            token = create_login_token(data=payload)
+                payload = {
+                    "sub": str(user.id),
+                    "role": user.role.value if hasattr(user.role, "value") else str(user.role)
+                }
+                token = create_login_token(data=payload)
         except SQLAlchemyError as e:
             raise DomainError("Database error") from e
         return user, token
@@ -98,7 +98,8 @@ class AuthService:
         if not self._is_email_valid_for_delivery(normalized_email):
             return "If the e-mail is registered, you will receive a reset link."
 
-        user = self.uow.user_repo.get_user_by_email(normalized_email)
+        with self.uow.read_only():
+            user = self.uow.user_repo.get_user_by_email(normalized_email)
         if not user:
             return "If the e-mail is registered, you will receive a reset link."
 
