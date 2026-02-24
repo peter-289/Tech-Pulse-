@@ -202,7 +202,7 @@
         const successBox = document.getElementById("successBox");
         const successText = document.getElementById("successText");
         const tokenError = document.getElementById("tokenError");
-        const loginUrl = "__LOGIN_URL__";
+        const loginUrl = __LOGIN_URL_JSON__;
         const params = new URLSearchParams(window.location.search);
         const token = params.get("token");
 

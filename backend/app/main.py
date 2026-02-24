@@ -6,7 +6,7 @@ import asyncio
 import logging
 
 from app.exceptions.handlers import register_exception_handlers
-from app.core.config import FRONTEND_URL, EMAIL_RECOVERY_ENABLED
+from app.core.config import settings
 from app.core.audit_middleware import AuditMiddleware
 from app.core.logging_setup import configure_logging
 from app.database.db_setup import SessionLocal
@@ -21,6 +21,7 @@ from app.api.v1.projects import router as project_router
 from app.api.v1.resources import router as resource_router
 from app.api.v1.software_packages import router as software_package_router
 from app.api.v1.admin import router as admin_router
+from app.api.v1.analytics import router as analytics_router
 
 configure_logging()
 
@@ -36,7 +37,7 @@ register_exception_handlers(app)
 
 
 # CORS configuration
-origins = [origin.strip() for origin in FRONTEND_URL.split(",") if origin.strip()]
+origins = [origin.strip() for origin in settings.FRONTEND_URL.split(",") if origin.strip()]
 
 app.add_middleware(
     CORSMiddleware,
@@ -51,13 +52,14 @@ app.add_middleware(AuditMiddleware)
 # Ensure crucial services are on on startup.
 @app.on_event("startup")
 async def startup():
+      settings.validate_security()
       init_db()
       db = SessionLocal()
       try:
           seed_superuser(db)
       finally:
           db.close()
-      if EMAIL_RECOVERY_ENABLED:
+      if settings.EMAIL_RECOVERY_ENABLED:
           app.state.email_recovery_stop_event = asyncio.Event()
           app.state.email_recovery_task = asyncio.create_task(
               run_verification_recovery_loop(app.state.email_recovery_stop_event)
@@ -98,6 +100,7 @@ app.include_router(project_router)
 app.include_router(resource_router)
 app.include_router(software_package_router)
 app.include_router(admin_router)
+app.include_router(analytics_router)
 
 # Serve frontend build in production if present
 frontend_build = Path(__file__).resolve().parents[2] / "frontend" / "build"

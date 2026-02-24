@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import LandingPage from './LandingPage';
 import RegistrationPage from './RegistrationPage';
 import ResourcesPage from './ResourcesPage';
@@ -15,6 +15,7 @@ import SupportChatPage from './SupportChatPage';
 import ProjectHubPage from './ProjectHubPage';
 import Header from './components/Header';
 import api from './API_Wrapper';
+import { trackUserActivity } from './cookieTracking';
 
 function MainRouter() {
   const resolveInitialPage = () => {
@@ -39,6 +40,9 @@ function MainRouter() {
   // Navigation handler
   const goTo = (target) => () => setPage(target);
   const navigate = (target) => {
+    if (isLoggedIn) {
+      trackUserActivity('navigate', page, { target }).catch(() => {});
+    }
     if (target === 'support_ai' && isLoggedIn) {
       setIsSupportChatOpen(true);
       return;
@@ -80,6 +84,19 @@ function MainRouter() {
     setPage('landing');
   };
 
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    trackUserActivity('page_view', page).catch(() => {});
+  }, [isLoggedIn, page]);
+
+  const openResourceDetails = (slug, sourcePage) => {
+    if (isLoggedIn) {
+      trackUserActivity('open_resource_details', sourcePage, { slug }).catch(() => {});
+    }
+    setSelectedResourceSlug(slug);
+    setPage('resource_details');
+  };
+
   // Pass navigation as props to children
   return (
     <div className="app-root">
@@ -108,20 +125,20 @@ function MainRouter() {
           user={user}
           onAdmin={goTo('admin')}
           onNavigate={navigate}
-          onOpenResource={(slug)=>{ setSelectedResourceSlug(slug); setPage('resource_details')}}
+          onOpenResource={(slug) => openResourceDetails(slug, 'resources')}
         />
       )}
       {page === 'api_docs' && isLoggedIn && (
-        <APIDocs user={user} onOpenResource={(slug) => { setSelectedResourceSlug(slug); setPage('resource_details'); }} />
+        <APIDocs user={user} onOpenResource={(slug) => openResourceDetails(slug, 'api_docs')} />
       )}
       {page === 'kb' && isLoggedIn && (
-        <KnowledgeBase user={user} onOpenResource={(slug) => { setSelectedResourceSlug(slug); setPage('resource_details'); }} />
+        <KnowledgeBase user={user} onOpenResource={(slug) => openResourceDetails(slug, 'kb')} />
       )}
       {page === 'support' && isLoggedIn && (
-        <SupportCenter user={user} onOpenResource={(slug) => { setSelectedResourceSlug(slug); setPage('resource_details'); }} />
+        <SupportCenter user={user} onOpenResource={(slug) => openResourceDetails(slug, 'support')} />
       )}
       {page === 'updates' && isLoggedIn && (
-        <ProductUpdates user={user} onOpenResource={(slug) => { setSelectedResourceSlug(slug); setPage('resource_details'); }} />
+        <ProductUpdates user={user} onOpenResource={(slug) => openResourceDetails(slug, 'updates')} />
       )}
       {page === 'projects' && isLoggedIn && <ProjectHubPage user={user} />}
             {page === 'resource_details' && isLoggedIn && selectedResourceSlug && (
@@ -134,8 +151,14 @@ function MainRouter() {
         <SupportChatPage
           user={user}
           isOpen={isSupportChatOpen}
-          onOpen={() => setIsSupportChatOpen(true)}
-          onClose={() => setIsSupportChatOpen(false)}
+          onOpen={() => {
+            trackUserActivity('support_chat_open', page).catch(() => {});
+            setIsSupportChatOpen(true);
+          }}
+          onClose={() => {
+            trackUserActivity('support_chat_close', page).catch(() => {});
+            setIsSupportChatOpen(false);
+          }}
         />
       )}
     </div>

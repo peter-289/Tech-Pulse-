@@ -9,11 +9,7 @@ from typing import AsyncIterable
 
 from sqlalchemy.exc import IntegrityError
 
-from app.core.config import (
-    PACKAGE_UPLOAD_CHUNK_SIZE_BYTES,
-    PACKAGE_UPLOAD_MAX_SIZE_BYTES,
-    PACKAGE_USER_QUOTA_BYTES,
-)
+from app.core.config import settings
 from app.core.unit_of_work import UnitOfWork
 from app.domain.software_package import FileVersionDraft, SoftwarePackageDraft
 from app.exceptions.exceptions import ConflictError, NotFoundError, PermissionError, ValidationError
@@ -86,8 +82,8 @@ class SoftwarePackageService:
         uow: UnitOfWork,
         storage: StorageBackend,
         scanner: MalwareScanner | None = None,
-        max_file_size_bytes: int = PACKAGE_UPLOAD_MAX_SIZE_BYTES,
-        user_quota_bytes: int = PACKAGE_USER_QUOTA_BYTES,
+        max_file_size_bytes: int = settings.PACKAGE_UPLOAD_MAX_SIZE_BYTES,
+        user_quota_bytes: int = settings.PACKAGE_USER_QUOTA_BYTES,
     ):
         self.uow = uow
         self.storage = storage
@@ -277,7 +273,7 @@ class SoftwarePackageService:
 
     async def complete_upload(self, *, upload_id: str, user_id: int) -> int:
         hasher = StreamingSHA256()
-        async for chunk in self.storage.stream_upload(upload_id, chunk_size=PACKAGE_UPLOAD_CHUNK_SIZE_BYTES):
+        async for chunk in self.storage.stream_upload(upload_id, chunk_size=settings.PACKAGE_UPLOAD_CHUNK_SIZE_BYTES):
             hasher.update(chunk)
         return await self._finalize_upload_with_checksum(
             upload_id=upload_id,
@@ -335,7 +331,7 @@ class SoftwarePackageService:
         version_draft.validate()
 
         await self.scanner.scan_stream(
-            self.storage.stream_upload(upload_id, chunk_size=PACKAGE_UPLOAD_CHUNK_SIZE_BYTES),
+            self.storage.stream_upload(upload_id, chunk_size=settings.PACKAGE_UPLOAD_CHUNK_SIZE_BYTES),
             filename=file_name,
             content_type=content_type,
         )

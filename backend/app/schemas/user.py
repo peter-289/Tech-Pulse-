@@ -37,6 +37,6 @@ class UserRead(UserBase):
 
 class ProfileResponse(BaseModel):
     user_id: int
-    access_token: str
+    access_token: Optional[str] = None
     token_type: str
     role: str

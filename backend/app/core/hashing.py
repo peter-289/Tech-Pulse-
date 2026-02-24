@@ -11,7 +11,6 @@ ph = PasswordHasher(
 )
 
 
-
 def _normalize_password(password: str) -> str:
     """Normalize password using NFKC Unicode normalization.
     

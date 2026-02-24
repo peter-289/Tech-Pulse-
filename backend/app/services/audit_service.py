@@ -5,12 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, func, select
 
-from app.core.config import (
-    ALERT_ACCESS_DENIED_THRESHOLD,
-    ALERT_DEDUP_MINUTES,
-    ALERT_LOGIN_FAILURE_THRESHOLD,
-    ALERT_LOOKBACK_MINUTES,
-)
+from app.core.config import settings
 from app.database.db_setup import SessionLocal
 from app.models.audit_event import AuditEvent
 from app.models.security_alert import SecurityAlert
@@ -56,8 +51,8 @@ def log_http_audit_event(
 
 def _detect_and_create_alerts(*, session, event: AuditEvent) -> None:
     now = datetime.now(timezone.utc)
-    lookback_from = now - timedelta(minutes=ALERT_LOOKBACK_MINUTES)
-    dedup_from = now - timedelta(minutes=ALERT_DEDUP_MINUTES)
+    lookback_from = now - timedelta(minutes=settings.ALERT_LOOKBACK_MINUTES)
+    dedup_from = now - timedelta(minutes=settings.ALERT_DEDUP_MINUTES)
 
     if event.event_type == "auth.login.failed" and event.ip_address:
         failures = _count_events(
@@ -66,7 +61,7 @@ def _detect_and_create_alerts(*, session, event: AuditEvent) -> None:
             ip_address=event.ip_address,
             from_time=lookback_from,
         )
-        if failures >= ALERT_LOGIN_FAILURE_THRESHOLD:
+        if failures >= settings.ALERT_LOGIN_FAILURE_THRESHOLD:
             _create_alert_if_needed(
                 session=session,
                 rule_code="AUTH_BRUTE_FORCE_IP",
@@ -74,7 +69,7 @@ def _detect_and_create_alerts(*, session, event: AuditEvent) -> None:
                 title="Possible brute force login attempts",
                 description=(
                     f"{failures} failed login attempts from IP {event.ip_address} "
-                    f"in the last {ALERT_LOOKBACK_MINUTES} minute(s)."
+                    f"in the last {settings.ALERT_LOOKBACK_MINUTES} minute(s)."
                 ),
                 actor_user_id=event.actor_user_id,
                 ip_address=event.ip_address,
@@ -90,7 +85,7 @@ def _detect_and_create_alerts(*, session, event: AuditEvent) -> None:
             ip_address=event.ip_address,
             from_time=lookback_from,
         )
-        if denied_count >= ALERT_ACCESS_DENIED_THRESHOLD:
+        if denied_count >= settings.ALERT_ACCESS_DENIED_THRESHOLD:
             _create_alert_if_needed(
                 session=session,
                 rule_code="EXCESSIVE_FORBIDDEN_REQUESTS",
@@ -98,7 +93,7 @@ def _detect_and_create_alerts(*, session, event: AuditEvent) -> None:
                 title="Excessive forbidden requests detected",
                 description=(
                     f"{denied_count} forbidden requests detected in the last "
-                    f"{ALERT_LOOKBACK_MINUTES} minute(s)."
+                    f"{settings.ALERT_LOOKBACK_MINUTES} minute(s)."
                 ),
                 actor_user_id=event.actor_user_id,
                 ip_address=event.ip_address,

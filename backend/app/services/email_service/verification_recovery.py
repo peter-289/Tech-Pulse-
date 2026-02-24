@@ -3,15 +3,7 @@ import logging
 import random
 from datetime import datetime, timedelta
 
-from app.core.config import (
-    EMAIL_RECOVERY_BACKOFF_BASE_SECONDS,
-    EMAIL_RECOVERY_BACKOFF_MAX_SECONDS,
-    EMAIL_RECOVERY_ELIGIBLE_AGE_SECONDS,
-    EMAIL_RECOVERY_INTERVAL_SECONDS,
-    EMAIL_RECOVERY_MAX_BATCH_SIZE,
-    EMAIL_RECOVERY_MAX_RETRY_COUNT,
-    EMAIL_RECOVERY_STARTUP_DELAY_SECONDS,
-)
+from app.core.config import settings
 from app.core.security import create_email_verification_token
 from app.core.unit_of_work import UnitOfWork
 from app.database.db_setup import SessionLocal
@@ -21,8 +13,8 @@ from app.services.email_service.email_service import send_verification_email
 
 def compute_recovery_delay_seconds(
     retry_count: int,
-    base_delay_seconds: int = EMAIL_RECOVERY_BACKOFF_BASE_SECONDS,
-    max_delay_seconds: int = EMAIL_RECOVERY_BACKOFF_MAX_SECONDS,
+    base_delay_seconds: int = settings.EMAIL_RECOVERY_BACKOFF_BASE_SECONDS,
+    max_delay_seconds: int = settings.EMAIL_RECOVERY_BACKOFF_MAX_SECONDS,
 ) -> int:
     cap = min(max_delay_seconds, base_delay_seconds * (2 ** max(0, retry_count - 1)))
     return max(1, int(random.uniform(0, cap)))
@@ -79,7 +71,7 @@ def mark_verification_email_failed(
 
 async def process_unverified_users_once() -> None:
     now = datetime.utcnow()
-    created_before = now - timedelta(seconds=EMAIL_RECOVERY_ELIGIBLE_AGE_SECONDS)
+    created_before = now - timedelta(seconds=settings.EMAIL_RECOVERY_ELIGIBLE_AGE_SECONDS)
     candidates: list[dict[str, int | str]] = []
     db = SessionLocal()
     try:
@@ -88,8 +80,8 @@ async def process_unverified_users_once() -> None:
             users = uow.user_repo.list_users_pending_verification_email_retry(
                 now=now,
                 created_before=created_before,
-                max_retry_count=EMAIL_RECOVERY_MAX_RETRY_COUNT,
-                limit=EMAIL_RECOVERY_MAX_BATCH_SIZE,
+                max_retry_count=settings.EMAIL_RECOVERY_MAX_RETRY_COUNT,
+                limit=settings.EMAIL_RECOVERY_MAX_BATCH_SIZE,
             )
             candidates = [
                 {
@@ -134,7 +126,7 @@ async def process_unverified_users_once() -> None:
 
 
 async def run_verification_recovery_loop(stop_event: asyncio.Event) -> None:
-    startup_wait = max(0, EMAIL_RECOVERY_STARTUP_DELAY_SECONDS)
+    startup_wait = max(0, settings.EMAIL_RECOVERY_STARTUP_DELAY_SECONDS)
     if startup_wait:
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=startup_wait)
@@ -149,6 +141,6 @@ async def run_verification_recovery_loop(stop_event: asyncio.Event) -> None:
             logging.exception("[recovery] Verification recovery loop iteration failed: %s", exc)
 
         try:
-            await asyncio.wait_for(stop_event.wait(), timeout=EMAIL_RECOVERY_INTERVAL_SECONDS)
+            await asyncio.wait_for(stop_event.wait(), timeout=settings.EMAIL_RECOVERY_INTERVAL_SECONDS)
         except asyncio.TimeoutError:
             continue

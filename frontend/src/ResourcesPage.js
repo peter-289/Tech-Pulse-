@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import api from './API_Wrapper';
 import './Workspace.css';
 import './ResourcesPage.css';
+import { getCookieConsent, setCookieConsent, trackConsentDecision, trackUserActivity } from './cookieTracking';
 
 const defaultOrder = ['api', 'knowledge', 'support', 'updates'];
 const sectionLabels = {
@@ -18,6 +19,7 @@ export default function ResourcesPage({ onLogout, user, onAdmin, onNavigate, onO
     projects: 0,
     chats: 0
   });
+  const [consentStatus, setConsentStatus] = useState(() => getCookieConsent());
 
   const userName = user?.full_name || user?.user_name || 'User';
   const [workspaceLoadedAt, setWorkspaceLoadedAt] = useState('');
@@ -69,8 +71,44 @@ export default function ResourcesPage({ onLogout, user, onAdmin, onNavigate, onO
 
   const totalResources = resources.reduce((acc, section) => acc + section.items.length, 0);
 
+  const acceptCookies = async () => {
+    setCookieConsent('accepted');
+    setConsentStatus('accepted');
+    try {
+      await trackConsentDecision('accepted', 'resources');
+      await trackUserActivity('consent_enabled_tracking', 'resources');
+    } catch {
+      // ignore telemetry errors in UI
+    }
+  };
+
+  const declineCookies = async () => {
+    setCookieConsent('declined');
+    setConsentStatus('declined');
+    try {
+      await trackConsentDecision('declined', 'resources');
+    } catch {
+      // ignore telemetry errors in UI
+    }
+  };
+
   return (
     <div className="tp-workspace">
+      {!consentStatus && (
+        <div className="tp-consent-overlay" role="dialog" aria-modal="true" aria-labelledby="tp-consent-title">
+          <div className="tp-consent-modal">
+            <h2 id="tp-consent-title">Cookie Usage</h2>
+            <p>
+              We use cookies to track in-app activity and improve your dashboard experience. Do you accept cookie
+              usage?
+            </p>
+            <div className="tp-actions">
+              <button className="tp-btn tp-btn-primary" onClick={acceptCookies}>Accept</button>
+              <button className="tp-btn tp-btn-secondary" onClick={declineCookies}>Decline</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="tp-shell">
         <header className="tp-hero">
           <div className="tp-hero-content">
@@ -118,15 +156,33 @@ export default function ResourcesPage({ onLogout, user, onAdmin, onNavigate, onO
               <span className="tp-card-note">Jump straight into active workflows</span>
             </div>
             <div className="tp-quick-grid">
-              <button className="tp-quick-card" onClick={() => onNavigate('projects')}>
+              <button
+                className="tp-quick-card"
+                onClick={() => {
+                  trackUserActivity('quick_action_projects', 'resources').catch(() => {});
+                  onNavigate('projects');
+                }}
+              >
                 <span className="tp-quick-title">Project Hub</span>
                 <span className="tp-quick-desc">Upload and distribute software packages</span>
               </button>
-              <button className="tp-quick-card" onClick={() => onNavigate('support_ai')}>
+              <button
+                className="tp-quick-card"
+                onClick={() => {
+                  trackUserActivity('quick_action_support_ai', 'resources').catch(() => {});
+                  onNavigate('support_ai');
+                }}
+              >
                 <span className="tp-quick-title">AI Assistant</span>
                 <span className="tp-quick-desc">Resolve issues and ask technical questions</span>
               </button>
-              <button className="tp-quick-card" onClick={() => onNavigate('api_docs')}>
+              <button
+                className="tp-quick-card"
+                onClick={() => {
+                  trackUserActivity('quick_action_api_docs', 'resources').catch(() => {});
+                  onNavigate('api_docs');
+                }}
+              >
                 <span className="tp-quick-title">API Documentation</span>
                 <span className="tp-quick-desc">Review available endpoints and payloads</span>
               </button>
@@ -165,12 +221,23 @@ export default function ResourcesPage({ onLogout, user, onAdmin, onNavigate, onO
                         <p className="tp-muted">{item.description}</p>
                         <div className="tp-actions">
                           {item.url && (
-                            <a className="tp-btn tp-btn-secondary" href={item.url} target="_blank" rel="noopener noreferrer">
+                            <a
+                              className="tp-btn tp-btn-secondary"
+                              href={item.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={() => {
+                                trackUserActivity('open_resource_link', 'resources', { slug: item.slug || null }).catch(() => {});
+                              }}
+                            >
                               Open Link
                             </a>
                           )}
                           {item.slug && (
-                            <button className="tp-btn tp-btn-primary" onClick={() => onOpenResource(item.slug)}>
+                            <button
+                              className="tp-btn tp-btn-primary"
+                              onClick={() => onOpenResource(item.slug)}
+                            >
                               Details
                             </button>
                           )}

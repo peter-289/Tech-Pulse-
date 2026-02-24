@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import requests
 
-from app.core.config import AI_API_KEY, AI_BASE_URL, SUPPORT_CHAT_MODEL
+from app.core.config import settings
 from app.core.unit_of_work import UnitOfWork
 from app.exceptions.exceptions import ExternalServiceError, ValidationError
 from app.models.chat_message import ChatMessage
@@ -12,7 +12,10 @@ class SupportChatService:
     SYSTEM_PROMPT = (
         "You are Tech Pulse customer support. "
         "Be concise, accurate, and provide actionable troubleshooting steps. "
-        "If a request involves account security, advise the user to contact an administrator."
+        "If a user asks for account details, you may provide them."
+        "If a user asks for a refund, you may provide instructions on how to request one. "
+        "If a user asks for a feature, you may acknowledge the request and suggest they submit it through the feedback form. "
+        "If a user asks for a status update on an issue, you may provide a generic response that the team is investigating and will provide updates as they become available. "
     )
 
     def __init__(self, uow: UnitOfWork):
@@ -39,19 +42,19 @@ class SupportChatService:
             return self.uow.chat_message_repo.list_for_user(user_id=user_id, limit=limit)
 
     def _generate_reply(self, message: str) -> str:
-        if not AI_API_KEY:
+        if not settings.AI_API_KEY:
             return (
                 "Support assistant is in fallback mode. "
                 "Please include your issue details, expected behavior, and any error message."
             )
 
-        url = f"{AI_BASE_URL.rstrip('/')}/chat/completions"
+        url = f"{settings.AI_BASE_URL.rstrip('/')}/chat/completions"
         headers = {
-            "Authorization": f"Bearer {AI_API_KEY}",
+            "Authorization": f"Bearer {settings.AI_API_KEY}",
             "Content-Type": "application/json",
         }
         payload = {
-            "model": SUPPORT_CHAT_MODEL,
+            "model": settings.SUPPORT_CHAT_MODEL,
             "temperature": 0.2,
             "messages": [
                 {"role": "system", "content": self.SYSTEM_PROMPT},
@@ -77,4 +80,3 @@ class SupportChatService:
         if not content:
             raise ExternalServiceError("AI support service returned an empty response")
         return content
-

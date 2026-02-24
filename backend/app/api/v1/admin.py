@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Path as ApiPath, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.config import LOG_FILE_PATH
+from app.core.config import settings
 from app.core.security import admin_access
 from app.database.db_setup import get_db
 from app.models.audit_event import AuditEvent
@@ -42,7 +42,7 @@ def get_logs(
     lines: int = Query(200, ge=1, le=1000),
     _admin: dict = Depends(admin_access),
 ):
-    log_path = Path(LOG_FILE_PATH)
+    log_path = Path(settings.LOG_FILE_PATH)
     return {
         "log_file": str(log_path),
         "lines_requested": lines,
@@ -128,6 +128,44 @@ def list_audit_events(
                 "ip_address": event.ip_address,
                 "user_agent": event.user_agent,
                 "request_id": event.request_id,
+                "metadata": event.metadata_json or {},
+                "occurred_at": event.occurred_at,
+            }
+            for event in events
+        ],
+    }
+
+
+@router.get("/cookie-activity", status_code=200)
+def list_cookie_activity(
+    actor_user_id: int | None = Query(None, ge=1),
+    limit: int = Query(200, ge=1, le=1000),
+    db: Session = Depends(get_db),
+    _admin: dict = Depends(admin_access),
+):
+    tracked_types = (
+        "cookie.consent.accepted",
+        "cookie.consent.declined",
+        "client.activity",
+    )
+    stmt = (
+        select(AuditEvent)
+        .where(AuditEvent.event_type.in_(tracked_types))
+        .order_by(AuditEvent.occurred_at.desc())
+        .limit(limit)
+    )
+    if actor_user_id is not None:
+        stmt = stmt.where(AuditEvent.actor_user_id == actor_user_id)
+    events = db.execute(stmt).scalars().all()
+    return {
+        "count": len(events),
+        "items": [
+            {
+                "id": event.id,
+                "event_type": event.event_type,
+                "actor_user_id": event.actor_user_id,
+                "ip_address": event.ip_address,
+                "user_agent": event.user_agent,
                 "metadata": event.metadata_json or {},
                 "occurred_at": event.occurred_at,
             }

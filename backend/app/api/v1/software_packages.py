@@ -9,11 +9,7 @@ from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.core.config import (
-    PACKAGE_STORAGE_BACKEND,
-    PACKAGE_UPLOAD_CHUNK_SIZE_BYTES,
-    UPLOAD_ROOT,
-)
+from app.core.config import settings
 from app.core.security import admin_access, get_current_user
 from app.core.unit_of_work import UnitOfWork
 from app.database.db_setup import get_db
@@ -35,11 +31,11 @@ router = APIRouter(prefix="/api/v1/software-packages", tags=["Software Packages"
 
 
 def _build_storage_backend():
-    if PACKAGE_STORAGE_BACKEND == "local":
-        return LocalFileSystemStorage(Path(UPLOAD_ROOT) / "software_packages")
-    if PACKAGE_STORAGE_BACKEND == "object":
+    if settings.PACKAGE_STORAGE_BACKEND == "local":
+        return LocalFileSystemStorage(Path(settings.UPLOAD_ROOT) / "software_packages")
+    if settings.PACKAGE_STORAGE_BACKEND == "object":
         return ObjectStorageBackend()
-    raise RuntimeError(f"Unsupported PACKAGE_STORAGE_BACKEND: {PACKAGE_STORAGE_BACKEND}")
+    raise RuntimeError(f"Unsupported PACKAGE_STORAGE_BACKEND: {settings.PACKAGE_STORAGE_BACKEND}")
 
 
 def get_service(db: Session = Depends(get_db)) -> SoftwarePackageService:
@@ -82,7 +78,7 @@ def _parse_range(range_header: str | None, total_size: int) -> tuple[int, int] |
 
 async def _upload_file_chunk_stream(upload_file: UploadFile) -> AsyncIterator[bytes]:
     while True:
-        chunk = await upload_file.read(PACKAGE_UPLOAD_CHUNK_SIZE_BYTES)
+        chunk = await upload_file.read(settings.PACKAGE_UPLOAD_CHUNK_SIZE_BYTES)
         if not chunk:
             break
         yield chunk
@@ -301,7 +297,7 @@ async def download_software_package(
             ticket.storage_key,
             start=start,
             end=end,
-            chunk_size=PACKAGE_UPLOAD_CHUNK_SIZE_BYTES,
+            chunk_size=settings.PACKAGE_UPLOAD_CHUNK_SIZE_BYTES,
         ):
             yield chunk
         elapsed_ms = int((time.perf_counter() - started) * 1000)

@@ -4,7 +4,7 @@ import logging
 import uuid
 from pathlib import Path
 
-from app.core.config import UPLOAD_ROOT
+from app.core.config import settings
 from app.core.unit_of_work import UnitOfWork
 from app.exceptions.exceptions import NotFoundError, PermissionError, ValidationError
 from app.models.project import Project
@@ -18,7 +18,7 @@ class ProjectHubService:
 
     def __init__(self, uow: UnitOfWork):
         self.uow = uow
-        self.projects_dir = Path(UPLOAD_ROOT) / "projects"
+        self.projects_dir = Path(settings.UPLOAD_ROOT) / "projects"
         self.projects_dir.mkdir(parents=True, exist_ok=True)
 
     def create_project(

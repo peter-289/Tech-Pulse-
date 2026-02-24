@@ -3,11 +3,7 @@ import logging
 import random
 from fastapi import BackgroundTasks
 
-from app.core.config import (
-    EMAIL_RETRY_BASE_DELAY_SECONDS,
-    EMAIL_RETRY_MAX_ATTEMPTS,
-    EMAIL_RETRY_MAX_DELAY_SECONDS,
-)
+from app.core.config import settings
 from app.services.email_service.email_service import send_verification_email
 from app.services.email_service.verification_recovery import (
     mark_verification_email_failed,
@@ -36,9 +32,9 @@ async def _send_verification_email_with_retries(
     email: str,
     name: str,
     user_id: int | None = None,
-    max_attempts: int = EMAIL_RETRY_MAX_ATTEMPTS,
-    base_delay_seconds: int = EMAIL_RETRY_BASE_DELAY_SECONDS,
-    max_delay_seconds: int = EMAIL_RETRY_MAX_DELAY_SECONDS,
+    max_attempts: int = settings.EMAIL_RETRY_MAX_ATTEMPTS,
+    base_delay_seconds: int = settings.EMAIL_RETRY_BASE_DELAY_SECONDS,
+    max_delay_seconds: int = settings.EMAIL_RETRY_MAX_DELAY_SECONDS,
 ) -> None:
     for attempt in range(1, max_attempts + 1):
         try:

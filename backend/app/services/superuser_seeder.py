@@ -2,14 +2,7 @@ import logging
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.core.config import (
-    SUPERUSER_EMAIL,
-    SUPERUSER_FULL_NAME,
-    SUPERUSER_PASSWORD,
-    SUPERUSER_SEED_ENABLED,
-    SUPERUSER_UPDATE_PASSWORD_ON_STARTUP,
-    SUPERUSER_USERNAME,
-)
+from app.core.config import settings
 from app.core.hashing import hash_password
 from app.models.enums import GenderEnum, RoleEnum, UserStatus
 from app.models.user import User
@@ -20,11 +13,11 @@ logger = logging.getLogger(__name__)
 
 
 def seed_superuser(session: Session) -> None:
-    if not SUPERUSER_SEED_ENABLED:
+    if not settings.SUPERUSER_SEED_ENABLED:
         logger.info("[startup] Superuser seeding disabled")
         return
 
-    required = [SUPERUSER_USERNAME, SUPERUSER_EMAIL, SUPERUSER_PASSWORD]
+    required = [settings.SUPERUSER_USERNAME, settings.SUPERUSER_EMAIL, settings.SUPERUSER_PASSWORD]
     if not all(item and item.strip() for item in required):
         logger.warning(
             "[startup] Superuser not seeded. Missing one of SUPERUSER_USERNAME, "
@@ -34,9 +27,9 @@ def seed_superuser(session: Session) -> None:
     
     repo = UserRepo(session)
 
-    username = SUPERUSER_USERNAME.strip()
-    email = SUPERUSER_EMAIL.strip().lower()
-    full_name = (SUPERUSER_FULL_NAME).strip()
+    username = settings.SUPERUSER_USERNAME.strip()
+    email = settings.SUPERUSER_EMAIL.strip().lower()
+    full_name = (settings.SUPERUSER_FULL_NAME).strip()
 
     try:
         user_by_username = repo.get_user_by_username(username)
@@ -63,7 +56,7 @@ def seed_superuser(session: Session) -> None:
                 username=username,
                 email=email,
                 gender=GenderEnum.PREFER_NOT_TO_SAY,
-                password_hash=hash_password(SUPERUSER_PASSWORD),
+                password_hash=hash_password(settings.SUPERUSER_PASSWORD),
                 status=UserStatus.VERIFIED,
                 role=RoleEnum.ADMIN,
             )
@@ -80,8 +73,8 @@ def seed_superuser(session: Session) -> None:
         if user.status != UserStatus.VERIFIED:
             user.status = UserStatus.VERIFIED
             dirty = True
-        if SUPERUSER_UPDATE_PASSWORD_ON_STARTUP:
-            user.password_hash = hash_password(SUPERUSER_PASSWORD)
+        if settings.SUPERUSER_UPDATE_PASSWORD_ON_STARTUP:
+            user.password_hash = hash_password(settings.SUPERUSER_PASSWORD)
             dirty = True
 
         if dirty:

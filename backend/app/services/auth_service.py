@@ -6,6 +6,7 @@ from app.core.security import (
     create_login_token,
     create_email_verification_token,
     create_password_reset_token,
+    consume_password_reset_token,
     get_email_user,
     get_password_reset_user,
     validate_password_strength,
@@ -17,30 +18,45 @@ from app.models.enums import UserStatus
 from app.models.session import UserSession
 from app.services.email_service.email_worker import queue_verification_email
 from app.services.email_service.email_service import send_password_reset_email
-from app.core.config import REFRESH_TOKEN_EXPIRE_DAYS
+from app.core.config import settings
 
 from sqlalchemy.exc import SQLAlchemyError
 
 class AuthService:
     def __init__(self, uow: UnitOfWork):
-        self.uow = uow
+        self.uow = uow # Context manager
     
+    # Authenticate user and return a user and a token
     def authenticate_user(self, username: str, password: str):
+        normalized_username = (username or "").strip()
+        if not normalized_username:
+            raise ValidationError("Username is required")
+        if not isinstance(password, str) or password == "":
+            raise ValidationError("Password is required")
+
         try:
-            with self.uow.read_only():
-                user = self.uow.user_repo.get_user_by_username(username)
-                if not user or not verify_password(user.password_hash, password):
+            with self.uow:
+                # Fetch user and perform security checks
+                user = self.uow.user_repo.get_user_by_username(normalized_username)
+                verified_hash = verify_password(user.password_hash, password) if user else None
+                if not user or not verified_hash:
                     raise ValidationError("Invalid username or password")
-                
+
                 if user.status != UserStatus.VERIFIED:
                     raise ValidationError("Email not approved")
+
+                # Opportunistically upgrade hash parameters on successful login.
+                if verified_hash != user.password_hash:
+                    user.password_hash = verified_hash
 
                 payload = {
                     "sub": str(user.id),
                     "role": user.role.value if hasattr(user.role, "value") else str(user.role)
                 }
                 token = create_login_token(data=payload)
-        except SQLAlchemyError as e:
+        except RuntimeError:
+            raise ValidationError("Invalid username or password")
+        except SQLAlchemyError as e: 
             raise DomainError("Database error") from e
         return user, token
     
@@ -75,7 +91,7 @@ class AuthService:
     def create_session(self, user_id: int, user_agent: str | None, ip_address: str | None):
         refresh_token = secrets.token_urlsafe(32)
         refresh_hash = self._hash_refresh_token(refresh_token)
-        expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+        expires_at = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
 
         session = UserSession(
             user_id=user_id,
@@ -118,6 +134,8 @@ class AuthService:
         validate_password_strength(new_password)
 
         payload = get_password_reset_user(token=token)
+        if not consume_password_reset_token(token=token, exp=payload["exp"]):
+            raise ValidationError("Reset token has already been used")
         with self.uow:
             user = self.uow.user_repo.get_user_by_id(payload["user_id"])
             if not user:
@@ -133,7 +151,8 @@ class AuthService:
         now = datetime.now(timezone.utc)
         with self.uow:
             session = self.uow.session_repo.get_by_refresh_hash(refresh_hash)
-            if not session or session.revoked_at or session.expires_at <= now:
+            expires_at = self._as_utc(session.expires_at) if session else None
+            if not session or session.revoked_at or not expires_at or expires_at <= now:
                 raise ValidationError("Invalid or expired session")
 
             user = self.uow.user_repo.get_user_by_id(session.user_id)
@@ -163,6 +182,15 @@ class AuthService:
 
     def _hash_refresh_token(self, refresh_token: str) -> str:
         return hashlib.sha256(refresh_token.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _as_utc(value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            # Some DB backends (e.g., SQLite) return naive datetimes.
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
     def _is_email_valid_for_delivery(self, email: str) -> bool:
         # SMTP/email legitimacy validation hook can be plugged in here later.

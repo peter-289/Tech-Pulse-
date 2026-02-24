@@ -130,6 +130,35 @@
   padding: 0.16rem 0.48rem;
 }
 
+.tp-consent-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 23, 42, 0.54);
+  backdrop-filter: blur(2px);
+  padding: 1rem;
+}
+
+.tp-consent-modal {
+  width: min(520px, 100%);
+  background: #ffffff;
+  border: 1px solid #d7e3ef;
+  border-radius: 16px;
+  box-shadow: 0 30px 90px -40px rgba(15, 23, 42, 0.8);
+  padding: 1rem 1rem 0.9rem;
+}
+
+.tp-consent-modal h2 {
+  margin: 0 0 0.3rem;
+}
+
+.tp-consent-modal p {
+  margin: 0 0 0.8rem;
+  color: #4f6377;
+}
+
 @media (max-width: 940px) {
   .tp-hero {
     flex-direction: column;

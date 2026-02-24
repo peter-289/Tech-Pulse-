@@ -4,7 +4,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from app.core.config import LOG_BACKUP_COUNT, LOG_FILE_PATH, LOG_LEVEL, LOG_MAX_BYTES
+from app.core.config import settings
 
 
 def configure_logging() -> None:
@@ -13,7 +13,7 @@ def configure_logging() -> None:
     if getattr(root_logger, "_techpulse_configured", False):
         return
 
-    log_file = Path(LOG_FILE_PATH)
+    log_file = Path(settings.LOG_FILE_PATH)
     log_file.parent.mkdir(parents=True, exist_ok=True)
 
     formatter = logging.Formatter(
@@ -23,8 +23,8 @@ def configure_logging() -> None:
 
     file_handler = RotatingFileHandler(
         filename=log_file,
-        maxBytes=LOG_MAX_BYTES,
-        backupCount=LOG_BACKUP_COUNT,
+        maxBytes=settings.LOG_MAX_BYTES,
+        backupCount=settings.LOG_BACKUP_COUNT,
         encoding="utf-8",
     )
     file_handler.setFormatter(formatter)
@@ -32,7 +32,7 @@ def configure_logging() -> None:
     stream_handler = logging.StreamHandler()
     stream_handler.setFormatter(formatter)
 
-    root_logger.setLevel(LOG_LEVEL)
+    root_logger.setLevel(settings.LOG_LEVEL)
     root_logger.addHandler(file_handler)
     root_logger.addHandler(stream_handler)
     setattr(root_logger, "_techpulse_configured", True)

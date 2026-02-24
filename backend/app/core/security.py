@@ -1,18 +1,13 @@
 from jose import JWTError, jwt
 from datetime import datetime, timedelta, timezone
+import hashlib
+import secrets
 from fastapi.security import OAuth2PasswordBearer
 from fastapi import Depends, HTTPException, status, Request
 
 from app.exceptions.exceptions import DomainError
-from app.core.config import (
-    LOGIN_TOKEN_EXPIRE_MINUTES, 
-    ALGORITHM, 
-    EMAIL_VERIFY_SECRET,
-    PASSWORD_RESET_SECRET,
-    SECRET_KEY,
-    EMAIL_TOKEN_EXPIRE_MINUTES,
-    PASSWORD_RESET_TOKEN_EXPIRE_MINUTES,
-    ACCESS_COOKIE_NAME)
+from app.core.abuse_protection import abuse_protection
+from app.core.config import settings
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
@@ -35,10 +30,10 @@ def create_login_token(data: dict, expires_delta: timedelta | None = None)->str:
     """Creates a login token"""
     
     to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=LOGIN_TOKEN_EXPIRE_MINUTES))
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=settings.LOGIN_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp":expire})
 
-    token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    token = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return token
 
 
@@ -46,7 +41,7 @@ def create_login_token(data: dict, expires_delta: timedelta | None = None)->str:
 def create_email_verification_token(user_id: int)->str:
     """Creates an email verification token"""
     now = datetime.now(timezone.utc)
-    expire = now + timedelta(minutes=EMAIL_TOKEN_EXPIRE_MINUTES)
+    expire = now + timedelta(minutes=settings.EMAIL_TOKEN_EXPIRE_MINUTES)
     
     payload = {
         "sub": str(user_id),
@@ -55,22 +50,23 @@ def create_email_verification_token(user_id: int)->str:
         "purpose": EXPECTED_PURPOSE,
         "iss": EXPECTED_ISSUER
     }
-    token = jwt.encode(payload, EMAIL_VERIFY_SECRET, algorithm=ALGORITHM)
+    token = jwt.encode(payload, settings.EMAIL_VERIFY_SECRET, algorithm=settings.ALGORITHM)
     return token
 
 
 def create_password_reset_token(user_id: int) -> str:
     """Creates a password reset token."""
     now = datetime.now(timezone.utc)
-    expire = now + timedelta(minutes=PASSWORD_RESET_TOKEN_EXPIRE_MINUTES)
+    expire = now + timedelta(minutes=settings.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES)
     payload = {
         "sub": str(user_id),
         "exp": expire,
         "iat": now,
+        "jti": secrets.token_urlsafe(16),
         "purpose": EXPECTED_RESET_PURPOSE,
         "iss": EXPECTED_ISSUER,
     }
-    return jwt.encode(payload, PASSWORD_RESET_SECRET, algorithm=ALGORITHM)
+    return jwt.encode(payload, settings.PASSWORD_RESET_SECRET, algorithm=settings.ALGORITHM)
 
 # Get the current user from the token sent to them in the header or cookie
 def get_current_user(
@@ -78,19 +74,19 @@ def get_current_user(
         token: str = Depends(oauth2_scheme),
 ):
     try:
-    
+
         if not token:
-            token = request.cookies.get(ACCESS_COOKIE_NAME)
+            token = request.cookies.get(settings.ACCESS_COOKIE_NAME)
         if not token:
             raise credentials_exception
         
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: int = payload.get("sub")
-        role: str = payload.get("role")
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        user_id = int(payload.get("sub"))
+        role: str = str(payload.get("role"))
         
         if not user_id or not role:
            raise credentials_exception
-    except JWTError:
+    except (JWTError, ValueError, TypeError):
         raise credentials_exception
     return {
         "user_id": user_id,
@@ -99,7 +95,7 @@ def get_current_user(
 
 
 def get_current_user_optional(request: Request) -> dict | None:
-    token = request.cookies.get(ACCESS_COOKIE_NAME) if request else None
+    token = request.cookies.get(settings.ACCESS_COOKIE_NAME) if request else None
     if not token:
         auth_header = request.headers.get("authorization") if request else None
         if auth_header and auth_header.lower().startswith("bearer "):
@@ -107,13 +103,13 @@ def get_current_user_optional(request: Request) -> dict | None:
     if not token:
         return None
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         user_id = payload.get("sub")
         role = payload.get("role")
         if not user_id or not role:
             return None
         return {"user_id": int(user_id), "role": str(role)}
-    except JWTError:
+    except (JWTError, ValueError, TypeError):
         return None
 
 
@@ -122,8 +118,8 @@ def get_email_user(token: str):
     try:
         payload = jwt.decode(
             token, 
-            EMAIL_VERIFY_SECRET, 
-            algorithms=[ALGORITHM],
+            settings.EMAIL_VERIFY_SECRET, 
+            algorithms=[settings.ALGORITHM],
             options={"require": ["sub", "exp","iat", "purpose", "iss" ]}
             )
         
@@ -147,20 +143,38 @@ def get_password_reset_user(token: str):
     try:
         payload = jwt.decode(
             token,
-            PASSWORD_RESET_SECRET,
-            algorithms=[ALGORITHM],
-            options={"require": ["sub", "exp", "iat", "purpose", "iss"]},
+            settings.PASSWORD_RESET_SECRET,
+            algorithms=[settings.ALGORITHM],
+            options={"require": ["sub", "exp", "iat", "jti", "purpose", "iss"]},
         )
         user_id: int = payload["sub"]
+        jti: str = payload["jti"]
         purpose: str = payload["purpose"]
         issuer: str = payload["iss"]
+        exp = payload["exp"]
         if purpose != EXPECTED_RESET_PURPOSE:
             raise credentials_exception
         if issuer != EXPECTED_ISSUER:
             raise credentials_exception
     except (JWTError, ValueError, TypeError):
         raise credentials_exception
-    return {"user_id": int(user_id), "purpose": purpose}
+    return {"user_id": int(user_id), "jti": jti, "purpose": purpose, "exp": exp}
+
+
+def consume_password_reset_token(token: str, exp: int | float | datetime) -> bool:
+    """Marks a reset token as used so it cannot be replayed."""
+    if isinstance(exp, datetime):
+        expiry_ts = int(exp.timestamp())
+    else:
+        expiry_ts = int(exp)
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    ttl_seconds = max(1, expiry_ts - now_ts)
+    token_fingerprint = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    return abuse_protection.set_once(
+        scope="password_reset_token",
+        key=token_fingerprint,
+        ttl_seconds=ttl_seconds,
+    )
 
 
 # Check for admin access
@@ -178,6 +192,8 @@ def admin_access(
 def validate_password_strength(new_password: str) -> None:
     """Validate password strength according to defined criteria.""" 
  # Validate password strength
+    if not isinstance(new_password, str):
+            raise DomainError("Password must be text")
     if len(new_password) < 8:
             raise DomainError("Password must be at least 8 characters long")
     if not any(char.isdigit() for char in new_password):

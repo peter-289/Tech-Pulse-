@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
@@ -9,18 +10,8 @@ from app.services.auth_service import AuthService
 from app.core.unit_of_work import UnitOfWork
 from app.schemas.user import ProfileResponse
 from app.database.db_setup import get_db
-from app.core.config import (
-    ACCESS_COOKIE_NAME,
-    ACCESS_COOKIE_PATH,
-    FRONTEND_URL,
-    COOKIE_DOMAIN,
-    COOKIE_SAMESITE,
-    COOKIE_SECURE,
-    LOGIN_TOKEN_EXPIRE_MINUTES,
-    REFRESH_COOKIE_NAME,
-    REFRESH_COOKIE_PATH,
-    REFRESH_TOKEN_EXPIRE_DAYS,
-)
+from app.core.config import settings
+from app.core.abuse_protection import abuse_protection
 
 router = APIRouter(
     prefix="/api/v1/auth",
@@ -33,41 +24,65 @@ def get_service(session: Session = Depends(get_db))->AuthService:
     uow = UnitOfWork(session=session)
     return AuthService(uow)
 
+# Rate limiting functionality
+def _enforce_rate_limit(
+    *,
+    request: Request,
+    scope: str,
+    limit: int,
+    window_seconds: int,
+    identifier: str | None = None,
+) -> None:
+    ip_address = request.client.host if request and request.client else "unknown"
+    key = f"{ip_address}:{(identifier or '').strip().lower()}"
+    limited, retry_after = abuse_protection.hit_rate_limit(
+        scope=scope,
+        key=key,
+        limit=limit,
+        window_seconds=window_seconds,
+    )
+    if limited:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many requests. Please try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
 def _set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
-    access_max_age = LOGIN_TOKEN_EXPIRE_MINUTES * 60
-    refresh_max_age = REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
+    access_max_age = settings.LOGIN_TOKEN_EXPIRE_MINUTES * 60
+    refresh_max_age = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
 
     response.set_cookie(
-        key=ACCESS_COOKIE_NAME,
+        key=settings.ACCESS_COOKIE_NAME,
         value=access_token,
         httponly=True,
-        secure=COOKIE_SECURE,
-        samesite=COOKIE_SAMESITE,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
         max_age=access_max_age,
-        path=ACCESS_COOKIE_PATH,
-        domain=COOKIE_DOMAIN,
+        path=settings.ACCESS_COOKIE_PATH,
+        domain=settings.COOKIE_DOMAIN,
     )
     response.set_cookie(
-        key=REFRESH_COOKIE_NAME,
+        key=settings.REFRESH_COOKIE_NAME,
         value=refresh_token,
         httponly=True,
-        secure=COOKIE_SECURE,
-        samesite=COOKIE_SAMESITE,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
         max_age=refresh_max_age,
-        path=REFRESH_COOKIE_PATH,
-        domain=COOKIE_DOMAIN,
+        path=settings.REFRESH_COOKIE_PATH,
+        domain=settings.COOKIE_DOMAIN,
     )
 
 def _clear_auth_cookies(response: Response) -> None:
     response.delete_cookie(
-        key=ACCESS_COOKIE_NAME,
-        path=ACCESS_COOKIE_PATH,
-        domain=COOKIE_DOMAIN,
+        key=settings.ACCESS_COOKIE_NAME,
+        path=settings.ACCESS_COOKIE_PATH,
+        domain=settings.COOKIE_DOMAIN,
     )
     response.delete_cookie(
-        key=REFRESH_COOKIE_NAME,
-        path=REFRESH_COOKIE_PATH,
-        domain=COOKIE_DOMAIN,
+        key=settings.REFRESH_COOKIE_NAME,
+        path=settings.REFRESH_COOKIE_PATH,
+        domain=settings.COOKIE_DOMAIN,
     )
 
 # Login route
@@ -78,8 +93,15 @@ def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     service: AuthService = Depends(get_service),
       ):
-    username = form_data.username
+    username = (form_data.username or "").strip()
     password = form_data.password
+    _enforce_rate_limit(
+        request=request,
+        scope="auth_login",
+        limit=settings.AUTH_LOGIN_RATE_LIMIT,
+        window_seconds=settings.AUTH_LOGIN_WINDOW_SECONDS,
+        identifier=username,
+    )
 
     user, access_token = service.authenticate_user(username, password)
     user_agent = request.headers.get("user-agent") if request else None
@@ -92,12 +114,14 @@ def login(
     request.state.audit_actor_user_id = user.id
     # Set cookies
     _set_auth_cookies(response, access_token, refresh_token)
-    return {
+    payload = {
         "user_id": user.id,
-        "access_token": access_token,
         "token_type": "bearer",
         "role": user.role.value if hasattr(user.role, "value") else str(user.role),
     }
+    if settings.EXPOSE_ACCESS_TOKEN_IN_BODY:
+        payload["access_token"] = access_token
+    return payload
 
 # Logout route
 @router.post("/refresh", response_model=ProfileResponse, status_code=200)
@@ -106,8 +130,14 @@ def refresh_session(
     response: Response,
     service: AuthService = Depends(get_service),
 ):
+    _enforce_rate_limit(
+        request=request,
+        scope="auth_refresh",
+        limit=settings.AUTH_REFRESH_RATE_LIMIT,
+        window_seconds=settings.AUTH_REFRESH_WINDOW_SECONDS,
+    )
     # Get refresh token from cookie
-    refresh_token = request.cookies.get(REFRESH_COOKIE_NAME) if request else None
+    refresh_token = request.cookies.get(settings.REFRESH_COOKIE_NAME) if request else None
     if not refresh_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing refresh token")
 
@@ -119,12 +149,14 @@ def refresh_session(
         ip_address=ip_address,
     )
     _set_auth_cookies(response, access_token, new_refresh)
-    return {
+    payload = {
         "user_id": user.id,
-        "access_token": access_token,
         "token_type": "bearer",
         "role": user.role.value if hasattr(user.role, "value") else str(user.role),
     }
+    if settings.EXPOSE_ACCESS_TOKEN_IN_BODY:
+        payload["access_token"] = access_token
+    return payload
 
 
 # Logout route
@@ -134,7 +166,7 @@ def logout(
     response: Response,
     service: AuthService = Depends(get_service),
 ):
-    refresh_token = request.cookies.get(REFRESH_COOKIE_NAME) if request else None
+    refresh_token = request.cookies.get(settings.REFRESH_COOKIE_NAME) if request else None
     if refresh_token:
         service.revoke_session(refresh_token=refresh_token)
     _clear_auth_cookies(response)
@@ -161,30 +193,46 @@ def verify_page():
         / "verification_page.html"
     )
     html = template_path.read_text(encoding="utf-8")
-    frontend_origins = [origin.strip() for origin in FRONTEND_URL.split(",") if origin.strip()]
+    frontend_origins = [origin.strip() for origin in settings.FRONTEND_URL.split(",") if origin.strip()]
     login_base_url = (frontend_origins[0] if frontend_origins else "http://localhost:3000").rstrip("/")
     login_url = f"{login_base_url}/?page=login"
-    html = html.replace("__LOGIN_URL__", login_url)
+    html = html.replace("__LOGIN_URL_JSON__", json.dumps(login_url))
     return HTMLResponse(content=html)
 
 # Password reset routes
 @router.post("/password-reset/requests", status_code=200)
 def request_password_reset(
+    request: Request,
     background_tasks: BackgroundTasks,
     email: str = Form(...),
     service: AuthService = Depends(get_service),
 ):
+    # Enforce rate limiting
+    _enforce_rate_limit(
+        request=request,
+        scope="auth_password_reset_request",
+        limit=settings.AUTH_PASSWORD_RESET_REQUEST_RATE_LIMIT,
+        window_seconds=settings.AUTH_PASSWORD_RESET_REQUEST_WINDOW_SECONDS,
+        identifier=email,
+    )
     detail = service.request_password_reset(email=email, background_tasks=background_tasks)
     return {"detail": detail}
 
 # Password reset confirmation route
 @router.post("/password-reset/confirm", status_code=200)
 def confirm_password_reset(
+    request: Request,
     token: str = Form(...),
     new_password: str = Form(...),
     confirm_password: str = Form(...),
     service: AuthService = Depends(get_service),
 ):
+    _enforce_rate_limit(
+        request=request,
+        scope="auth_password_reset_confirm",
+        limit=settings.AUTH_PASSWORD_RESET_CONFIRM_RATE_LIMIT,
+        window_seconds=settings.AUTH_PASSWORD_RESET_CONFIRM_WINDOW_SECONDS,
+    )
     service.reset_password(
         token=token,
         new_password=new_password,
@@ -203,8 +251,10 @@ def password_reset_page(token: str):
         / "password_reset_page.html"
     )
     html = template_path.read_text(encoding="utf-8")
-    frontend_origins = [origin.strip() for origin in FRONTEND_URL.split(",") if origin.strip()]
+    frontend_origins = [origin.strip() for origin in settings.FRONTEND_URL.split(",") if origin.strip()]
     login_base_url = (frontend_origins[0] if frontend_origins else "http://localhost:3000").rstrip("/")
     login_url = f"{login_base_url}/?page=login"
-    html = html.replace("__TOKEN__", token).replace("__LOGIN_URL__", login_url)
+    html = html.replace("__TOKEN_JSON__", json.dumps(token)).replace(
+        "__LOGIN_URL_JSON__", json.dumps(login_url)
+    )
     return HTMLResponse(content=html)

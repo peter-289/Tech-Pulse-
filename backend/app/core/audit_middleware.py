@@ -9,7 +9,7 @@ import anyio
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
-from app.core.config import AUDIT_ENABLED
+from app.core.config import settings
 from app.core.security import get_current_user_optional
 from app.services.audit_service import log_http_audit_event
 
@@ -31,7 +31,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
             status_code = response.status_code
             return response
         finally:
-            if not AUDIT_ENABLED or self._should_skip(request.url.path):
+            if not settings.AUDIT_ENABLED or self._should_skip(request.url.path):
                 continue_logging = False
             else:
                 continue_logging = True
